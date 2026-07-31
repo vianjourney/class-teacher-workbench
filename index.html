@@ -312,6 +312,7 @@
       <section id="home" class="section active"></section>
       <section id="students" class="section"></section>
       <section id="scores" class="section"></section>
+      <section id="english" class="section"></section>
       <section id="attendance" class="section"></section>
       <section id="notes" class="section"></section>
       <section id="backup" class="section"></section>
@@ -389,9 +390,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         { name: "体育", fullScore: 50, passLine: 30 }
       ]
     };
-    const STORE_NAMES = ["students", "examBatches", "scores", "attendance", "notes", "settings"];
+    const STORE_NAMES = ["students", "examBatches", "scores", "attendance", "notes", "settings", "englishPapers", "englishKeys", "englishAnswers"];
     const DB_NAME = "classTeacherWorkbenchDB";
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
     let db;
     let state = {
       students: [],
@@ -399,6 +400,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       scores: [],
       attendance: [],
       notes: [],
+      englishPapers: [],
+      englishKeys: [],
+      englishAnswers: [],
       settings: {
         id: "settings",
         appName: "班主任工作台",
@@ -413,11 +417,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     let currentView = "home";
     let scoreExamId = "";
     let analysisStudentId = "";
+    let selectedEnglishPaperId = "";
+    let selectedEnglishStudentId = "";
 
     const navItems = [
       ["home", "首页总览", "总"],
       ["students", "学生档案", "生"],
       ["scores", "成绩分析", "分"],
+      ["english", "英语分析", "英"],
       ["attendance", "出勤台账", "勤"],
       ["notes", "日常表现", "记"],
       ["backup", "数据备份", "备"],
@@ -572,6 +579,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       state.scores = await getAll("scores");
       state.attendance = await getAll("attendance");
       state.notes = (await getAll("notes")).sort((a, b) => (b.datetime || "").localeCompare(a.datetime || ""));
+      state.englishPapers = (await getAll("englishPapers")).sort((a, b) => (b.date || b.createdAt || "").localeCompare(a.date || a.createdAt || ""));
+      state.englishKeys = await getAll("englishKeys");
+      state.englishAnswers = await getAll("englishAnswers");
       const settings = await getAll("settings");
       if (settings[0]) state.settings = { ...state.settings, ...settings[0] };
       else await putItem("settings", state.settings);
@@ -628,6 +638,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (currentView === "home") renderHome();
       if (currentView === "students") renderStudents();
       if (currentView === "scores") renderScores();
+      if (currentView === "english") renderEnglishAnalysis();
       if (currentView === "attendance") renderAttendance();
       if (currentView === "notes") renderNotes();
       if (currentView === "backup") renderBackup();
@@ -997,6 +1008,169 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       });
     }
 
+    function englishQuestions(paperId = selectedEnglishPaperId) {
+      return state.englishKeys
+        .filter(k => k.paperId === paperId)
+        .sort((a, b) => String(a.questionNo).localeCompare(String(b.questionNo), "zh-CN", { numeric: true }));
+    }
+
+    function normalizeAnswer(value) {
+      return String(value ?? "").trim().replace(/\s+/g, "").toUpperCase();
+    }
+
+    function isAnswerCorrect(studentAnswer, standardAnswer) {
+      return normalizeAnswer(studentAnswer) === normalizeAnswer(standardAnswer);
+    }
+
+    function englishAnswerFor(paperId, studentId) {
+      return state.englishAnswers.find(a => a.paperId === paperId && a.studentId === studentId);
+    }
+
+    function renderEnglishAnalysis() {
+      if (!selectedEnglishPaperId && state.englishPapers[0]) selectedEnglishPaperId = state.englishPapers[0].id;
+      if (!selectedEnglishStudentId && state.students[0]) selectedEnglishStudentId = state.students[0].id;
+      const paper = state.englishPapers.find(p => p.id === selectedEnglishPaperId);
+      document.getElementById("english").innerHTML = `
+        ${renderHeader("英语单科错题分析", "上传英语试卷文件，导入标准答案和学生每题作答，自动分析每个学生每一道错题。", `
+          <button class="btn primary" onclick="openEnglishPaperForm()">新建英语试卷</button>
+          <button class="btn ghost" onclick="pickFile('englishPaperFile')">上传试卷文件</button>
+          <button class="btn" onclick="pickFile('englishKeyImport')">导入标准答案</button>
+          <button class="btn" onclick="pickFile('englishAnswerImport')">导入学生作答</button>
+        `)}
+        <div class="card">
+          <div class="form-grid">
+            <label><span>选择英语试卷</span><select onchange="selectedEnglishPaperId=this.value;renderEnglishAnalysis()">
+              ${state.englishPapers.map(p => `<option value="${p.id}" ${selectedEnglishPaperId === p.id ? "selected" : ""}>${escapeHtml(p.name)} · ${escapeHtml(p.date || "")}</option>`).join("")}
+            </select></label>
+            <label><span>查看学生</span><select onchange="selectedEnglishStudentId=this.value;renderEnglishAnalysis()">
+              ${state.students.map(s => `<option value="${s.id}" ${selectedEnglishStudentId === s.id ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
+            </select></label>
+          </div>
+        </div>
+        ${paper ? englishPaperHtml(paper) : `<div class="card" style="margin-top:16px"><div class="empty">请先新建一份英语试卷。</div></div>`}
+      `;
+    }
+
+    function englishPaperHtml(paper) {
+      const questions = englishQuestions(paper.id);
+      const answerRows = state.englishAnswers.filter(a => a.paperId === paper.id);
+      const stats = englishStats(paper.id);
+      const avgRate = stats.length ? stats.reduce((sum, item) => sum + item.correctRate, 0) / stats.length : 0;
+      const hardCount = stats.filter(item => item.correctRate < 60).length;
+      return `
+        <div class="grid cols-4" style="margin-top:16px">
+          <div class="card stat"><div><div class="label">题目数量</div><div class="num">${questions.length}</div></div><span class="pill">标准答案</span></div>
+          <div class="card stat"><div><div class="label">作答人数</div><div class="num">${answerRows.length}</div></div><span class="pill">学生</span></div>
+          <div class="card stat"><div><div class="label">平均正确率</div><div class="num">${avgRate.toFixed(0)}%</div></div><span class="pill">班级</span></div>
+          <div class="card stat"><div><div class="label">易错题</div><div class="num">${hardCount}</div></div><span class="pill">低于60%</span></div>
+        </div>
+        <div class="grid cols-2" style="margin-top:16px">
+          <div class="card">
+            <h3>试卷信息</h3>
+            <div class="mini-list">
+              <div class="mini-item">试卷名称：${escapeHtml(paper.name)}</div>
+              <div class="mini-item">考试日期：${escapeHtml(paper.date || "未填")}</div>
+              <div class="mini-item">关联批次：${escapeHtml(state.examBatches.find(e => e.id === paper.examId)?.name || "未关联")}</div>
+              <div class="mini-item">试卷文件：${paper.fileName ? `${escapeHtml(paper.fileName)} <button class="btn small" onclick="downloadEnglishPaperFile('${paper.id}')">下载查看</button>` : "未上传"}</div>
+            </div>
+            <div class="toolbar" style="margin-top:12px">
+              <button class="btn" onclick="openEnglishPaperForm('${paper.id}')">编辑试卷</button>
+              <button class="btn" onclick="downloadEnglishKeyTemplate()">标准答案模板</button>
+              <button class="btn" onclick="downloadEnglishAnswerTemplate()">学生作答模板</button>
+              <button class="btn danger" onclick="removeEnglishPaper('${paper.id}')">删除试卷</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>学生错题清单</h3>
+            ${englishStudentWrongHtml(paper.id, selectedEnglishStudentId)}
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h3>题目正确率与错误学生</h3>
+          ${englishQuestionStatsHtml(paper.id)}
+        </div>`;
+    }
+
+    function englishStats(paperId) {
+      const questions = englishQuestions(paperId);
+      const answerRows = state.englishAnswers.filter(a => a.paperId === paperId);
+      return questions.map(q => {
+        const wrongStudents = [];
+        let correct = 0;
+        answerRows.forEach(row => {
+          const ans = row.answers?.[q.questionNo] ?? "";
+          if (isAnswerCorrect(ans, q.answer)) correct++;
+          else wrongStudents.push({ studentId: row.studentId, answer: ans });
+        });
+        const correctRate = answerRows.length ? correct / answerRows.length * 100 : 0;
+        return { ...q, correct, total: answerRows.length, correctRate, wrongStudents };
+      });
+    }
+
+    function englishQuestionStatsHtml(paperId) {
+      const stats = englishStats(paperId);
+      if (!stats.length) return `<div class="empty">请先导入标准答案。</div>`;
+      return `<div class="table-wrap"><table><thead><tr><th>题号</th><th>题型</th><th>标准答案</th><th>分值</th><th>知识点</th><th>正确率</th><th>错误学生</th></tr></thead><tbody>${stats.map(s => `<tr><td>${escapeHtml(s.questionNo)}</td><td>${escapeHtml(s.type || "")}</td><td>${escapeHtml(s.answer)}</td><td>${escapeHtml(s.score || "")}</td><td>${escapeHtml(s.knowledge || "")}</td><td>${s.correctRate.toFixed(1)}%</td><td>${s.wrongStudents.map(w => `${escapeHtml(studentName(w.studentId))}(${escapeHtml(w.answer || "空")})`).join("、") || "无"}</td></tr>`).join("")}</tbody></table></div>`;
+    }
+
+    function englishStudentWrongHtml(paperId, studentId) {
+      if (!studentId) return `<div class="empty">请先添加学生。</div>`;
+      const row = englishAnswerFor(paperId, studentId);
+      const questions = englishQuestions(paperId);
+      if (!questions.length) return `<div class="empty">请先导入标准答案。</div>`;
+      if (!row) return `<div class="empty">还没有导入该学生作答。</div>`;
+      const wrong = questions.filter(q => !isAnswerCorrect(row.answers?.[q.questionNo], q.answer));
+      const score = questions.reduce((sum, q) => sum + (isAnswerCorrect(row.answers?.[q.questionNo], q.answer) ? Number(q.score || 0) : 0), 0);
+      const total = questions.reduce((sum, q) => sum + Number(q.score || 0), 0);
+      return `
+        <div class="mini-list">
+          <div class="mini-item">${escapeHtml(studentName(studentId))}：得分 ${score}/${total}，错题 ${wrong.length} 道</div>
+          ${wrong.length ? wrong.map(q => `<div class="mini-item"><div class="note-date">第 ${escapeHtml(q.questionNo)} 题 · ${escapeHtml(q.type || "")} · ${escapeHtml(q.knowledge || "未标知识点")}</div>学生答案：${escapeHtml(row.answers?.[q.questionNo] || "空")}；正确答案：${escapeHtml(q.answer)}；分值：${escapeHtml(q.score || "")}</div>`).join("") : `<div class="mini-item">该学生没有错题。</div>`}
+        </div>`;
+    }
+
+    function openEnglishPaperForm(id = "") {
+      const p = state.englishPapers.find(x => x.id === id) || {};
+      openModal(id ? "编辑英语试卷" : "新建英语试卷", `
+        <div class="form-grid">
+          <label><span>试卷名称</span><input class="input" id="engPaperName" value="${escapeHtml(p.name || "")}" placeholder="例如：八年级英语期中试卷"></label>
+          <label><span>考试日期</span><input class="input" id="engPaperDate" type="date" value="${escapeHtml(p.date || today())}"></label>
+          <label><span>关联考试批次</span><select id="engPaperExam"><option value="">不关联</option>${state.examBatches.map(e => `<option value="${e.id}" ${p.examId === e.id ? "selected" : ""}>${escapeHtml(e.name)}</option>`).join("")}</select></label>
+          <label><span>备注</span><input class="input" id="engPaperRemark" value="${escapeHtml(p.remark || "")}"></label>
+        </div>
+        <div class="toolbar" style="margin-top:16px;justify-content:flex-end">
+          <button class="btn primary" onclick="saveEnglishPaper('${id}')">保存</button>
+        </div>`);
+    }
+
+    async function saveEnglishPaper(id = "") {
+      const item = {
+        ...(state.englishPapers.find(p => p.id === id) || {}),
+        id: id || uid("engpaper"),
+        name: document.getElementById("engPaperName").value.trim(),
+        date: document.getElementById("engPaperDate").value,
+        examId: document.getElementById("engPaperExam").value,
+        remark: document.getElementById("engPaperRemark").value.trim(),
+        createdAt: id ? (state.englishPapers.find(p => p.id === id)?.createdAt || nowText()) : nowText()
+      };
+      if (!item.name) return alert("请填写试卷名称");
+      await putItem("englishPapers", item);
+      selectedEnglishPaperId = item.id;
+      await loadState();
+      closeModal();
+      render();
+    }
+
+    async function removeEnglishPaper(id) {
+      if (!confirm("删除试卷会同时删除该试卷的标准答案和学生作答，是否继续？")) return;
+      await deleteItem("englishPapers", id);
+      for (const item of state.englishKeys.filter(x => x.paperId === id)) await deleteItem("englishKeys", item.id);
+      for (const item of state.englishAnswers.filter(x => x.paperId === id)) await deleteItem("englishAnswers", item.id);
+      selectedEnglishPaperId = "";
+      await loadState();
+      render();
+    }
+
     function renderAttendance() {
       const studentFilter = document.getElementById("attStudentFilter")?.value || "";
       const statusFilter = document.getElementById("attStatusFilter")?.value || "";
@@ -1329,7 +1503,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     function pickFile(type) {
       const input = document.getElementById("filePicker");
       input.value = "";
-      input.accept = type === "jsonImport" ? ".json" : ".xlsx,.xls,.csv";
+      if (type === "jsonImport") input.accept = ".json";
+      else if (type === "englishPaperFile") input.accept = ".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx";
+      else input.accept = ".xlsx,.xls,.csv";
       input.onchange = e => handleFile(type, e.target.files[0]);
       input.click();
     }
@@ -1337,11 +1513,104 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     async function handleFile(type, file) {
       if (!file) return;
       if (type === "jsonImport") return importAllJson(file);
+      if (type === "englishPaperFile") return importEnglishPaperFile(file);
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data);
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
       if (type === "studentImport") await importStudents(rows);
       if (type === "scoreImport") await importScores(rows);
+      if (type === "englishKeyImport") await importEnglishKey(rows);
+      if (type === "englishAnswerImport") await importEnglishAnswers(rows);
+    }
+
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function importEnglishPaperFile(file) {
+      if (!selectedEnglishPaperId) return alert("请先新建或选择一份英语试卷");
+      if (file.size > 8 * 1024 * 1024) return alert("试卷文件建议小于 8MB，太大会影响 iPad 本地保存速度");
+      const paper = state.englishPapers.find(p => p.id === selectedEnglishPaperId);
+      if (!paper) return alert("未找到当前试卷");
+      paper.fileName = file.name;
+      paper.fileType = file.type || "application/octet-stream";
+      paper.fileSize = file.size;
+      paper.fileData = await fileToDataUrl(file);
+      await putItem("englishPapers", paper);
+      await loadState();
+      alert("试卷文件已保存到本地数据库");
+      render();
+    }
+
+    function downloadEnglishPaperFile(paperId) {
+      const paper = state.englishPapers.find(p => p.id === paperId);
+      if (!paper?.fileData) return alert("还没有上传试卷文件");
+      const a = document.createElement("a");
+      a.href = paper.fileData;
+      a.download = paper.fileName || "英语试卷";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    async function importEnglishKey(rows) {
+      if (!selectedEnglishPaperId) return alert("请先新建或选择一份英语试卷");
+      let count = 0;
+      for (const old of state.englishKeys.filter(k => k.paperId === selectedEnglishPaperId)) await deleteItem("englishKeys", old.id);
+      for (const r of rows) {
+        const questionNo = String(r["题号"] || r["题目"] || r["Question"] || r["Q"] || "").trim();
+        if (!questionNo) continue;
+        await putItem("englishKeys", {
+          id: uid("engkey"),
+          paperId: selectedEnglishPaperId,
+          questionNo,
+          type: String(r["题型"] || r["类型"] || "").trim(),
+          answer: String(r["标准答案"] || r["答案"] || r["Answer"] || "").trim(),
+          score: Number(r["分值"] || r["分数"] || r["Score"] || 1),
+          knowledge: String(r["知识点"] || r["考点"] || "").trim()
+        });
+        count++;
+      }
+      await loadState();
+      alert(`已导入 ${count} 道题的标准答案`);
+      render();
+    }
+
+    async function importEnglishAnswers(rows) {
+      if (!selectedEnglishPaperId) return alert("请先新建或选择一份英语试卷");
+      const questions = englishQuestions(selectedEnglishPaperId);
+      if (!questions.length) return alert("请先导入标准答案，再导入学生作答");
+      let count = 0;
+      const missing = [];
+      for (const r of rows) {
+        const name = String(r["学生姓名"] || r["姓名"] || "").trim();
+        if (!name) continue;
+        const stu = state.students.find(s => s.name === name);
+        if (!stu) { missing.push(name); continue; }
+        const answers = {};
+        questions.forEach(q => {
+          const keys = [q.questionNo, `Q${q.questionNo}`, `第${q.questionNo}题`, `题${q.questionNo}`];
+          const foundKey = keys.find(k => Object.prototype.hasOwnProperty.call(r, k));
+          answers[q.questionNo] = foundKey ? String(r[foundKey]).trim() : "";
+        });
+        const existing = state.englishAnswers.find(a => a.paperId === selectedEnglishPaperId && a.studentId === stu.id);
+        await putItem("englishAnswers", {
+          id: existing?.id || uid("engans"),
+          paperId: selectedEnglishPaperId,
+          studentId: stu.id,
+          answers,
+          updatedAt: nowText()
+        });
+        count++;
+      }
+      await loadState();
+      alert(`已导入 ${count} 名学生作答${missing.length ? `；未匹配学生：${missing.join("、")}` : ""}`);
+      render();
     }
 
     async function importStudents(rows) {
@@ -1445,6 +1714,23 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       writeBook(aoaToBook("成绩导入模板", [row]), "成绩导入模板.xlsx");
     }
 
+    function downloadEnglishKeyTemplate() {
+      const rows = [
+        { 题号: "1", 题型: "单选", 标准答案: "A", 分值: 1, 知识点: "词汇辨析" },
+        { 题号: "2", 题型: "单选", 标准答案: "C", 分值: 1, 知识点: "时态" },
+        { 题号: "3", 题型: "阅读", 标准答案: "B", 分值: 2, 知识点: "细节理解" }
+      ];
+      writeBook(aoaToBook("英语标准答案模板", rows), "英语标准答案模板.xlsx");
+    }
+
+    function downloadEnglishAnswerTemplate() {
+      const questions = englishQuestions();
+      const cols = questions.length ? questions.map(q => q.questionNo) : Array.from({ length: 20 }, (_, i) => String(i + 1));
+      const row = { 学生姓名: "" };
+      cols.forEach(q => row[q] = "");
+      writeBook(aoaToBook("英语学生作答模板", [row]), "英语学生作答模板.xlsx");
+    }
+
     function exportAllJson() {
       const data = {
         version: "1.0",
@@ -1454,6 +1740,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         scores: state.scores,
         attendance: state.attendance,
         notes: state.notes,
+        englishPapers: state.englishPapers,
+        englishKeys: state.englishKeys,
+        englishAnswers: state.englishAnswers,
         settings: state.settings
       };
       downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), `班主任工作台完整备份_${today()}.json`);
@@ -1469,6 +1758,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       for (const sc of data.scores || []) await putItem("scores", sc);
       for (const a of data.attendance || []) await putItem("attendance", a);
       for (const n of data.notes || []) await putItem("notes", n);
+      for (const p of data.englishPapers || []) await putItem("englishPapers", p);
+      for (const k of data.englishKeys || []) await putItem("englishKeys", k);
+      for (const a of data.englishAnswers || []) await putItem("englishAnswers", a);
       await putItem("settings", { ...state.settings, ...(data.settings || {}), id: "settings" });
       await loadState();
       alert("完整备份已恢复");
